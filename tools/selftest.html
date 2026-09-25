@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>fogler self-test</title>
+<style>body { font: 14px/1.5 ui-monospace, monospace; background: #08090c; color: #f5f6f8; padding: 20px; } .fail { color: #ff6b6b; }</style>
+</head>
+<body>
+<pre id="out">running…</pre>
+<script type="module">
+  const out = document.getElementById('out');
+  const started = performance.now();
+  try {
+    const { lines, failures } = await import('./selftest.mjs');
+    out.innerHTML = lines.map((l) => l.includes('FAIL') ? `<span class="fail">${l}</span>` : l).join('\n') +
+      `\n(${Math.round(performance.now() - started)} ms)`;
+    document.title = failures ? `FAIL (${failures})` : 'PASS';
+  } catch (err) {
+    out.textContent = 'ERROR ' + (err && err.stack || err);
+    document.title = 'ERROR';
+  }
+</script>
+</body>
+</html>

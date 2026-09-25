@@ -1,0 +1,35 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+        with:
+          # Turns Pages on by itself on the first run; without this the job fails
+          # for as long as nothing is configured in the repository settings.
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          # The application is whatever sits in public/ — there is no build step.
+          path: public
+      - id: deployment
+        uses: actions/deploy-pages@v4

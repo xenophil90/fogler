@@ -1,0 +1,6 @@
+.DS_Store
+node_modules/
+# Personal location data — never commit.
+example/
+# Local dev server config (absolute paths).
+.claude/

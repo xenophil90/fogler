@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Fog-of-World-Daten in GPX umwandeln — für Dawarich, OsmAnd, Komoot und andere Apps. Läuft komplett im Browser.">
+<!-- The only outside request is the optional OpenStreetMap background (img-src).
+     The fog data itself never leaves the page: connect-src allows nothing foreign. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data: https://tile.openstreetmap.org; font-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none';">
+<title>fogler</title>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<!-- Bump on every visual change, see wordler: the host sends no Cache-Control. -->
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+<a class="skip-link" href="#preview" data-i18n="skipToPreview">Zur Karte springen</a>
+<div class="app">
+
+  <header class="app-header">
+    <div class="brand">
+      <img src="assets/logo.svg" alt="" class="brand-logo" width="40" height="40">
+      <div>
+        <h1>fogler</h1>
+        <p class="subtitle" data-i18n="subtitle">Fog of World → GPX, für Dawarich, OsmAnd &amp; Co.</p>
+      </div>
+    </div>
+    <div class="lang-switch">
+      <button type="button" id="langButton" class="lang-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="langMenu">
+        <span class="sr-only" data-i18n="langSelectLabel">Sprache</span>
+        <span id="langButtonLabel" lang="de">Deutsch</span>
+        <svg class="lang-caret" viewBox="0 0 10 6" aria-hidden="true" focusable="false">
+          <path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <ul class="lang-menu hidden" id="langMenu" role="listbox" aria-label="Sprache / Language" data-i18n-aria-label="langSelectLabel">
+        <li class="lang-option" role="option" tabindex="-1" data-value="de" lang="de" aria-selected="true">Deutsch</li>
+        <li class="lang-option" role="option" tabindex="-1" data-value="en" lang="en" aria-selected="false">English</li>
+      </ul>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="controls" aria-label="Einstellungen" data-i18n-aria-label="ariaControls">
+
+      <!-- ─── Import ─────────────────────────────────────────────── -->
+      <div class="panel">
+        <h2 class="panel-title" data-i18n="panelImport">Fog-of-World-Daten</h2>
+        <div class="dropzone" id="drop">
+          <input type="file" id="fileInput" class="file-input" multiple data-i18n-aria-label="labelFiles" aria-label="ZIP oder Sync-Dateien wählen">
+          <span data-i18n="dropHint">Sync-Ordner, ZIP oder Dateien hierher ziehen oder klicken</span>
+        </div>
+        <div class="row">
+          <button type="button" class="btn btn-ghost" id="folderBtn" data-i18n="btnFolder">Ordner wählen</button>
+          <input type="file" id="folderInput" class="hidden" webkitdirectory multiple tabindex="-1" aria-hidden="true">
+        </div>
+        <details class="help">
+          <summary data-i18n="helpSummary">Wo finde ich den Sync-Ordner?</summary>
+          <p data-i18n="helpText1">Fog of World synchronisiert in einen Ordner „Sync“, je nach Einstellung in iCloud Drive oder Dropbox (Ordner „Fog of World“ bzw. „Apps/Fog of World“).</p>
+          <p data-i18n="helpText2">Am Mac: den Ordner hierher ziehen. Am iPhone: in der Dateien-App lange auf „Sync“ drücken → „Komprimieren“, dann die ZIP-Datei hier auswählen.</p>
+        </details>
+
+        <div class="progress-wrap hidden" id="progressWrap">
+          <label for="progress" class="field-label" id="progressLabel"></label>
+          <div class="row">
+            <progress id="progress" max="1" value="0"></progress>
+            <button type="button" class="btn btn-ghost btn-small" id="cancelBtn" data-i18n="btnCancel">Abbrechen</button>
+          </div>
+        </div>
+
+        <dl class="facts hidden" id="summary">
+          <div><dt data-i18n="factTiles">Kacheln</dt><dd id="factTiles"></dd></div>
+          <div><dt data-i18n="factArea">Aufgedeckt</dt><dd id="factArea"></dd></div>
+          <div class="fact-wide"><dt data-i18n="factRange">Ausdehnung</dt><dd id="factRange"></dd></div>
+        </dl>
+        <p class="hint hidden" id="skippedHint"></p>
+      </div>
+
+      <!-- ─── Lines ──────────────────────────────────────────────── -->
+      <div class="panel hidden" id="linesPanel">
+        <h2 class="panel-title" data-i18n="panelLines">Wege</h2>
+        <div class="field">
+          <div class="label-row">
+            <label for="optEps" data-i18n="labelEps">Vereinfachung</label>
+            <output id="optEpsOut" for="optEps"></output>
+          </div>
+          <input type="range" id="optEps" min="5" max="50" step="1" value="10" aria-describedby="optEpsHint">
+          <p class="hint" id="optEpsHint" data-i18n="hintEps">Wie weit eine vereinfachte Linie vom Original abweichen darf. Größer = weniger Punkte, kleinere Datei.</p>
+        </div>
+        <div class="field">
+          <div class="label-row">
+            <label for="optMin" data-i18n="labelMin">Mindestlänge</label>
+            <output id="optMinOut" for="optMin"></output>
+          </div>
+          <input type="range" id="optMin" min="0" max="200" step="5" value="30" aria-describedby="optMinHint">
+          <p class="hint" id="optMinHint" data-i18n="hintMin">Kürzere Wegstücke werden weggelassen, meist GPS-Rauschen.</p>
+        </div>
+      </div>
+
+      <!-- ─── Timestamps ─────────────────────────────────────────── -->
+      <div class="panel hidden" id="timePanel">
+        <h2 class="panel-title" data-i18n="panelTime">Zeitstempel</h2>
+        <div class="switch-row">
+          <span id="lblTime" data-i18n="toggleTime">Künstliche Zeitstempel</span>
+          <button type="button" class="switch" id="optTime" role="switch" aria-checked="true" aria-labelledby="lblTime" aria-describedby="timeHint"></button>
+        </div>
+        <p class="hint" id="timeHint" data-i18n="hintTime">Fog of World speichert keine Zeiten. Dawarich ignoriert Punkte ohne Zeit, andere Apps brauchen sie nicht.</p>
+        <div id="timeFields">
+          <div class="field">
+            <label for="optStart" data-i18n="labelStart">Startdatum</label>
+            <input type="date" id="optStart" value="2000-01-01" required>
+          </div>
+          <div class="grid-2">
+            <div class="field">
+              <label for="optSpeed" data-i18n="labelSpeed">Tempo (km/h)</label>
+              <input type="number" id="optSpeed" min="1" max="300" step="1" value="5" inputmode="numeric">
+            </div>
+            <div class="field">
+              <label for="optGap" data-i18n="labelGap">Pause (min)</label>
+              <input type="number" id="optGap" min="1" max="1440" step="1" value="61" inputmode="numeric" aria-describedby="gapHint">
+            </div>
+          </div>
+          <p class="hint" id="gapHint" data-i18n="hintGap">Die Pause zwischen zwei Wegen muss länger sein als „Minutes between routes“ in Dawarich (Standard 60), sonst verbindet Dawarich die Wege mit geraden Linien.</p>
+          <p class="callout" id="timeRange" aria-live="polite"></p>
+        </div>
+      </div>
+
+      <!-- ─── Export ─────────────────────────────────────────────── -->
+      <div class="panel hidden" id="exportPanel">
+        <h2 class="panel-title" data-i18n="panelExport">Export</h2>
+        <div class="field">
+          <span class="field-label" id="lblScope" data-i18n="labelScope">Umfang</span>
+          <div class="segmented" id="optScope" role="radiogroup" aria-labelledby="lblScope">
+            <button type="button" class="segmented-btn" role="radio" aria-checked="true" data-value="all" data-i18n="scopeAll">Alles</button>
+            <button type="button" class="segmented-btn" role="radio" aria-checked="false" data-value="view" data-i18n="scopeView">Sichtbarer Ausschnitt</button>
+          </div>
+        </div>
+        <div class="field">
+          <span class="field-label" id="lblSplit" data-i18n="labelSplit">Dateien</span>
+          <div class="segmented" id="optSplit" role="radiogroup" aria-labelledby="lblSplit">
+            <button type="button" class="segmented-btn" role="radio" aria-checked="true" data-value="single" data-i18n="splitSingle">Eine GPX-Datei</button>
+            <button type="button" class="segmented-btn" role="radio" aria-checked="false" data-value="region" data-i18n="splitRegion">ZIP nach Region</button>
+          </div>
+          <p class="hint" data-i18n="hintSplit">„Nach Region“ legt eine Datei je 1°×1°-Feld an, für Apps, die große Dateien ablehnen.</p>
+        </div>
+        <dl class="facts" id="stats" aria-live="polite">
+          <div><dt data-i18n="statLines">Wege</dt><dd id="statLines">–</dd></div>
+          <div><dt data-i18n="statPoints">Punkte</dt><dd id="statPoints">–</dd></div>
+          <div><dt data-i18n="statKm">Länge</dt><dd id="statKm">–</dd></div>
+          <div><dt data-i18n="statSize">Größe ca.</dt><dd id="statSize">–</dd></div>
+        </dl>
+        <button type="button" class="btn btn-primary btn-block" id="exportBtn" data-i18n="btnExport">GPX herunterladen</button>
+      </div>
+    </section>
+
+    <section class="preview" id="preview" tabindex="-1" aria-label="Karte" data-i18n-aria-label="ariaPreview">
+      <div class="map-stage">
+        <div id="map" class="map" aria-describedby="mapDescription"></div>
+        <div class="preview-empty" id="previewEmpty">
+          <p data-i18n="emptyTitle">Noch keine Daten</p>
+          <p class="hint" data-i18n="emptyHint">Den Sync-Ordner von Fog of World oder eine ZIP-Datei davon links ablegen.</p>
+        </div>
+      </div>
+      <p class="sr-only" id="mapDescription"></p>
+      <div class="map-options hidden" id="mapOptions">
+        <div class="switch-row">
+          <span id="lblBasemap" data-i18n="toggleBasemap">Hintergrundkarte (OpenStreetMap)</span>
+          <button type="button" class="switch" id="optBasemap" role="switch" aria-checked="true" aria-labelledby="lblBasemap"></button>
+        </div>
+        <div class="switch-row">
+          <span id="lblCoverage" data-i18n="toggleCoverage">Original-Fläche zum Vergleich</span>
+          <button type="button" class="switch" id="optCoverage" role="switch" aria-checked="false" aria-labelledby="lblCoverage"></button>
+        </div>
+      </div>
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+      <p class="error hidden" id="error" role="alert"></p>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <p data-i18n="footerPrivacy">Deine Fog-Daten verlassen das Gerät nicht. Nur die Hintergrundkarte wird von OpenStreetMap geladen, und die lässt sich abschalten.</p>
+  </footer>
+</div>
+
+<!-- Support widget as in overmapper and wordler: drawn here, since the CSP allows no third-party script. -->
+<a class="bmc-fab" href="https://buymeacoffee.com/xeno90" target="_blank" rel="noopener noreferrer">
+  <svg class="bmc-cup" width="18" height="18" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+    <g transform="translate(-0.2 0.75)">
+      <path d="M2.6 5.6h7.9v3.9a3 3 0 0 1-3 3H5.6a3 3 0 0 1-3-3V5.6Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+      <path d="M10.5 6.6h1.6a1.7 1.7 0 0 1 0 3.4h-1.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M5.2 2v1.7M8.2 2v1.7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+    </g>
+  </svg>
+  <span class="bmc-fab-label" data-i18n="bmcLabel">Spendier mir einen Kaffee</span>
+  <span class="sr-only" data-i18n="bmcNewTab">(öffnet in neuem Tab)</span>
+</a>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
